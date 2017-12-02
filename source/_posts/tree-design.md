@@ -56,7 +56,7 @@ tags:
 在`tree_leaf表`里增删改记录即可。
 ### 4. 查找某个节点下所有的资产信息  
 + 包含其所有子节点的资产信息  
-以查询的节点的`huffman_id`为查询条件，查询`tree_node表`里`huffman_id`前缀为改ID的节点，随即获取该节点下的子树的所有节点，然后去`tree_leaf表`查找所有节点下挂载的资产信息ID即可。  
+以查询的节点的`huffman_id`为查询条件，查询`tree_node表`里parent_id`前缀为改ID的节点及它自身，随即获取该节点下的所有子树包括它自己的所有节点，然后去`tree_leaf表`查找所有节点下挂载的资产信息ID即可。  
     **注：这里可以采用join方式连接查询语句，可以避免使用in函数而使索引不生效的情况。**
 + 不包含其所有子节点的资产信息  
 直接在`tree_leaf表`里查询对应`huffman_id`的资产信息即可。
@@ -105,4 +105,147 @@ select * from tree_node
     join tree_leaf 
         on tree_node.huffman_id = tree_leaf.node_huffman_id 
     where host_sn = "host_1000";
+```
+
+## 五、代码示例
+``` python
+#import packages
+
+class tree_demo(object):
+
+    #init your db session
+    #db = SQLAlchemy()
+
+    #初始化
+    def __init__(self):
+        pass
+
+    #获取节点信息
+    def get_nodes_by_id(self, huffman_id = 1):
+        try:
+            node_record = db.session.query(tree_node).filter(tree_node.huffman_id == huffman_id).first()
+            return node_record
+        except Exception as e:
+            return e
+
+    #获取机器挂载的节点信息
+    def get_nodes_by_hostsn(self, host_sn):
+        try:
+            node_records = db.session.query(tree_node.name, tree_node.huffman_id, tree_node.parent_id).join(tree_leaf, 
+                tree_leaf.node_huffman_id == tree_node.huffman_id).filter(tree_leaf.host_sn == host_sn).all()
+            return node_records
+        except Exception as e:
+            return e
+
+    #获取该节点下包括其子节点下的所有资产信息
+    def get_hostsn_with_child(self, huffman_id = 1):
+        try:
+            key = '%s%%' % huffman_id
+            hostsn_records = db.session.query(tree_leaf.host_sn).join(tree_node, 
+                tree_leaf.node_huffman_id == tree_node.huffman_id).filter(
+                    tree_node.parent_id.like(key) | tree_node.huffman_id == huffman_id).all()
+            return hostsn_records
+        except Exception as e:
+            return e
+
+    #获取该节点下但不包括其子节点下的资产信息
+    def get_hostsn_without_child(self, huffman_id = 1):
+        try:
+            key = '%s%%' % huffman_id
+            hostsn_records = db.session.query(tree_leaf.host_sn).filter(tree_leaf.node_huffman_id == huffman_id).all()
+            return hostsn_records
+        except Exception as e:
+            return e
+
+    #渲染整棵树(广度优先遍历)
+    def get_tree(self, huffman_id = 1):
+        try:
+            pass
+        except Exception as e:
+            return e
+
+    #新增节点
+    def add_node(self, parent_id, name):
+        try:
+            new_node = tree_node()
+            new_node.parent_id = parent_id
+            new_node.name = name
+            db.session.commit()
+            new_node.huffman_id = parent_id + str(new_node.id)
+            db.session.commit()
+            return new_node
+        except Exception as e:
+            db.session.rollback()
+            return e
+
+    #删除节点
+    def delete_node(self, huffman_id):
+        try:
+            num_rows_deleted = db.session.query(tree_node).filter(tree_node.huffman_id == huffman_id).delete()
+            db.session.commit()
+            return num_rows_deleted
+        except Exception as e:
+            db.session.rollback()
+            return e
+
+    #更新节点名称
+    def update_node_name(self, huffman_id, name):
+        try:
+            num_rows_updated = db.session.query(tree_node).filter(tree_node.huffman_id == huffman_id).update({"name":name})
+            db.session.commit()
+            return num_rows_updated
+        except Exception as e:
+            db.session.rollback()
+            return e
+
+    #新增机器节点挂载信息
+    def add_leaf(self, huffman_id, host_sn):
+        try:
+            new_leaf = tree_leaf()
+            new_leaf.node_huffman_id = huffman_id
+            new_leaf.host_sn = host_sn
+            db.session.commit()
+            return new_leaf
+        except Exception as e:
+            return e
+
+    #删除机器节点挂在信息
+    def delete_leaf(self,huffman_id, host_sn):
+        try:
+            num_rows_deleted = db.session.query(tree_leaf).filter(tree_leaf.node_huffman_id == huffman_id).filter(
+                tree_leaf.host_sn == host_sn).delete()
+            db.session.commit()
+            return num_rows_deleted
+        except Exception as e:
+            db.session.rollback()
+            return e
+
+    #格式化整棵树
+    def truncate_tree(self):
+        try:
+            db.session.query(tree_node).filter(tree_node.id > 1).delete()
+            db.session.query(tree_leaf).delete()
+            db.session.commit()
+            return "Initialized"
+        except Exception as e:
+            db.session.rollback()
+            return e
+
+class tree_node(db.Model):
+    #please insert (1, "ROOT", 1, 1, now()) into your tree_node table for initializtion
+    __tablename__ = 'tree_node'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(255), nullable=False)
+    huffman_id = db.Column(db.String(50), nullable=False, default = "")
+    parent_id = db.Column(db.String(50), nullable=False, index=True)
+    update_time = db.Column(db.TIMESTAMP, nullable=False, server_default = func.now())        
+
+class tree_leaf(db.Model):
+    __tablename__ = 'tree_leaf'
+
+    id = db.Column(db.Integer, primary_key=True)
+    node_huffman_id = db.Column(db.String(50), nullable=False, index=True)
+    host_sn = db.Column(db.String(255), nullable=False)
+    update_time = db.Column(db.TIMESTAMP, nullable=False, server_default = func.now()) 
 ```
